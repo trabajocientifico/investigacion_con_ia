@@ -40,16 +40,20 @@
   .term{font-size:42px;font-weight:600;letter-spacing:.06em;fill:var(--cream)}
   .sup{font-size:11px;letter-spacing:.24em;fill:var(--slate)}
   .term-rule{stroke:var(--accent);stroke-width:2.5}
-  .kw{font-size:19px;font-weight:600;letter-spacing:.18em;fill:var(--accent);
-      opacity:0;transform:translateY(10px);transition:opacity .8s ease,transform .8s ease}
-  .kw.on{opacity:1;transform:none}
   .tag{font-size:10.5px;letter-spacing:.16em;fill:var(--slate);transition:fill .8s ease}
   .tag.hot{fill:var(--accent)}
   .tag.ok{fill:var(--leaf)}
   .tag.ink{fill:var(--cream);stroke:none}
   .val{font-size:11px;letter-spacing:.1em;fill:var(--slate)}
   .cita{font-size:11px;letter-spacing:.08em;fill:var(--slate)}
+  /* listas de autoría largas: caben enteras sin romper la tarjeta */
+  .citaSm{font-size:9.5px;letter-spacing:.03em;fill:var(--slate)}
   .line{font-size:15px;letter-spacing:.05em;fill:var(--cream)}
+  /* la ecuación de búsqueda se muestra como código: los operadores en el color
+     de la escena, los términos en crema. No es decoración: enseña la sintaxis. */
+  .code{font-size:12px;letter-spacing:.01em;fill:var(--cream)}
+  .codeop{fill:var(--accent);font-weight:600}
+  .micro{font-size:7.5px;letter-spacing:.06em;fill:var(--slate)}
   .big{font-size:26px;letter-spacing:.06em;fill:var(--slate)}
   .qbig{font-size:17px;letter-spacing:.05em;fill:var(--cream)}
   .tick{fill:var(--slate);opacity:.3;transition:opacity .5s,fill .5s}
@@ -60,6 +64,12 @@
   .fade{opacity:0;transition:opacity 1.3s ease}
   .fade.on{opacity:1}
   .dim,.fade.on.dim{opacity:.28;transition:opacity 1s ease}
+  /* los pasos de una franja esquemática: apagados hasta que les toca,
+     y en el color de la escena mientras son el paso del que se habla */
+  .paso{opacity:.22;transition:opacity .9s ease}
+  .paso.on{opacity:1}
+  .paso.hot path{stroke:var(--accent)}
+  .paso.hot text{fill:var(--accent)}
   .draw{stroke-dasharray:var(--len,1000);stroke-dashoffset:var(--len,1000);
         transition:stroke-dashoffset 3.4s cubic-bezier(.4,0,.3,1)}
   .draw.on{stroke-dashoffset:0}
@@ -148,6 +158,19 @@ function txt(parent,cls,x,y,s,extra){
   const t=el('text',Object.assign({class:cls,x:x,y:y},extra||{}),parent);
   t.textContent=s; return t;
 }
+/* un renglón de código con los operadores resaltados.
+   `partes` es una lista de tramos: la cadena sola va en crema, y ['AND',1]
+   marca el tramo como operador. Se usa <tspan> para no romper el monoespaciado. */
+function codeLine(parent,x,y,partes){
+  const t=el('text',{class:'code',x:x,y:y,'xml:space':'preserve'},parent);
+  partes.forEach(function(p){
+    const s=Array.isArray(p)?p[0]:p;
+    const sp=el('tspan',Array.isArray(p)&&p[1]?{class:'codeop'}:null,t);
+    sp.textContent=s;
+  });
+  return t;
+}
+
 const seeded=s=>()=>(s=(s*1664525+1013904223)>>>0)/4294967296;
 const stagger=(nodes,step,start)=>nodes.forEach((n,i)=>n.style.transitionDelay=((start||0)+i*step).toFixed(2)+'s');
 const on=(n,v)=>n.classList.toggle('on',!!v);
@@ -195,8 +218,12 @@ function chrome(svg,cfg,idx,total){
   txt(svg,'sup',34,52,cfg.sup);
   txt(svg,'term',34,96,cfg.term);
   if(cfg.term) el('line',{class:'term-rule',x1:36,y1:114,x2:122,y2:114},svg);
-  const kw=txt(svg,'kw',34,530,'');
-  const ticks=cfg.kws.map((_,i)=>el('rect',{class:'tick',x:898+i*22,y:524,width:14,height:2.5,rx:1},svg));
+  /* los beats se señalan solo con las marcas del canto: el rótulo de la esquina
+     repetía en texto lo que ya dice la escena. */
+  /* van alineadas a la derecha, bajo el paginador: con cinco beats la fila
+     antigua llegaba justo al borde del lienzo. */
+  const ticks=cfg.kws.map((_,i)=>el('rect',{class:'tick',
+    x:959-(cfg.kws.length-1-i)*11,y:525,width:7,height:1.5,rx:.75},svg));
   txt(svg,'pager',966,52,String(idx+1).padStart(2,'0')+' / '+String(total).padStart(2,'0'),{'text-anchor':'end'});
   if(cfg.momento){
     txt(svg,'tag hot',966,80,'Momento 0'+cfg.momento,{'text-anchor':'end'});
@@ -205,9 +232,6 @@ function chrome(svg,cfg,idx,total){
         fill:k===cfg.momento-1?HUE[ETAPAS[k]]:'rgba(255,255,255,.18)'},svg);
   }
   return function(beat){
-    kw.classList.remove('on'); kw.getBoundingClientRect();
-    kw.textContent=cfg.kws[beat]||'';
-    requestAnimationFrame(()=>kw.classList.add('on'));
     ticks.forEach((t,i)=>on(t,i<=beat));
   };
 }
@@ -325,6 +349,94 @@ function herramienta(parent,x,y,id,etiqueta){
     }};
 }
 
+/* ---------- trazo esquemático ----------
+   El trazo por defecto de las figuras: sigue el acento de la escena, así que la
+   misma función sirve en cualquier momento del flujo sin tocar el color. */
+const trazo=extra=>Object.assign({fill:'none',stroke:'var(--accent)',
+  'stroke-width':1.8,'stroke-linecap':'round','stroke-linejoin':'round'},extra||{});
+const TENUE={fill:'none',stroke:'var(--slate)','stroke-width':1.4,'stroke-linecap':'round'};
+
+/* ---------- una hoja de datos ----------
+   Rectángulo con la esquina doblada y unos renglones. El tamaño es el argumento:
+   dos hojas iguales son dos bases, una grande es todo lo recuperado y una pequeña
+   es lo que queda después de filtrar. `hot` la tiñe con el acento. */
+function hoja(parent,x,y,w,h,opts){
+  opts=opts||{};
+  const g=el('g',null,parent);
+  const f=Math.max(5,Math.round(w*.3));
+  const col=opts.hot?'var(--accent)':'var(--cream)';
+  el('path',{d:'M'+x+','+y+' H'+(x+w-f)+' L'+(x+w)+','+(y+f)+' V'+(y+h)+' H'+x+' Z',
+    fill:opts.hot?'var(--wash)':'rgba(255,255,255,.075)',stroke:col,
+    'stroke-width':opts.sw||1.6,'stroke-linejoin':'round'},g);
+  el('path',{d:'M'+(x+w-f)+','+y+' V'+(y+f)+' H'+(x+w),fill:'none',stroke:col,
+    'stroke-width':opts.sw||1.6,'stroke-linejoin':'round'},g);
+  const n=opts.n||3, sp=(h-f-4)/(n+1);
+  for(let k=0;k<n;k++){
+    const ry=(y+f+4+k*sp).toFixed(1), ancho=(k===n-1?.58:.68);
+    el('path',{d:'M'+(x+w*.16).toFixed(1)+','+ry+' H'+(x+w*(.16+ancho)).toFixed(1),
+      fill:'none',stroke:opts.hot?'var(--accent)':'var(--slate)',
+      'stroke-width':1.3,opacity:.75},g);
+  }
+  return g;
+}
+
+/* ---------- mini-figuras de la ruta ----------
+   Una por momento, en una caja de 40×40. No son logos: son la cosa misma —el
+   prompt y su ecuación, los dos archivos, el algoritmo, el árbol, la gráfica—
+   dibujada al tamaño de una viñeta para que la tarjeta no deje de ser tarjeta. */
+const MINIS={
+  /* 01 · el prompt propone y de él sale una ecuación con su operador */
+  ecuacion(g){
+    el('rect',trazo({x:0,y:0,width:46,height:18,rx:2.5}),g);
+    el('path',trazo({d:'M7,5 L11,9 L7,13'}),g);
+    el('path',Object.assign({d:'M17,12 H39'},TENUE),g);
+    el('rect',Object.assign({x:0,y:26,width:11,height:11,rx:2},TENUE),g);
+    el('rect',Object.assign({x:35,y:26,width:11,height:11,rx:2},TENUE),g);
+    txt(g,'micro',23,35,'AND',{'text-anchor':'middle',fill:'var(--accent)'});
+  },
+  /* 02 · dos archivos de texto, uno por base */
+  metadatos(g){
+    [1,22].forEach(function(x){
+      hoja(g,x,6,15,19,{n:3,sw:1.5});
+      txt(g,'micro',x+7.5,35,'txt',{'text-anchor':'middle'});
+    });
+  },
+  /* 03 · un algoritmo: entra, decide, reparte */
+  algoritmo(g){
+    el('rect',trazo({x:9,y:0,width:22,height:8,rx:1.5}),g);
+    el('path',trazo({d:'M20,8 V11.5 M17.6,9.6 L20,12.6 L22.4,9.6'}),g);
+    el('path',trazo({d:'M20,14 L28,21.5 L20,29 L12,21.5 Z'}),g);
+    el('path',Object.assign({d:'M14.6,26 L7,32.5 M25.4,26 L33,32.5'},TENUE),g);
+    el('rect',trazo({x:0,y:33,width:14,height:7,rx:1.5}),g);
+    el('rect',trazo({x:26,y:33,width:14,height:7,rx:1.5}),g);
+  },
+  /* 04 · el árbol: raíz, tronco y hojas */
+  arbol(g){
+    el('path',trazo({d:'M20,32 V5.5','stroke-width':2.4}),g);
+    el('path',Object.assign({d:'M20,32 L14,37 M20,32 L20,38 M20,32 L26,37'},TENUE),g);
+    [[13.5,37.5],[20,38.4],[26.5,37.5]].forEach(p=>
+      el('circle',{cx:p[0],cy:p[1],r:1.9,fill:'var(--slate)'},g));
+    el('path',trazo({d:'M20,23 L11,16 M20,23 L29,16 M20,15 L14.5,8 M20,15 L25.5,8'}),g);
+    [[11,15.5,3],[29,15.5,3],[14,7,2.6],[26,7,2.6],[20,4.6,3.2]].forEach(p=>
+      el('circle',{cx:p[0],cy:p[1],r:p[2],fill:'var(--accent)'},g));
+  },
+  /* 05 · el mapa: una figura de barras */
+  mapa(g){
+    el('path',{d:'M2,34 H39 M2,34 V5',fill:'none',stroke:'rgba(255,255,255,.32)',
+      'stroke-width':1.4},g);
+    [[6,14],[15,26],[24,9],[33,20]].forEach(function(b,i){
+      el('rect',{x:b[0],y:34-b[1],width:6.5,height:b[1],rx:1,
+        fill:i%2?'var(--a2)':'var(--accent)',opacity:.9},g);
+    });
+  }
+};
+
+function mini(parent,id,x,y){
+  const g=el('g',{class:'fade',transform:'translate('+x+','+y+')'},parent);
+  (MINIS[id]||function(){})(g);
+  return g;
+}
+
 function makeSci(parent,x,base,tool,scale){
   const s=scale||1;
   const g=el('g',{class:'sci',transform:'translate('+x+','+base+') scale('+s+')'},parent);
@@ -387,20 +499,22 @@ function slidePortada(svg,idx,total){
   txt(titulo,'qbig',92,362,'De la pregunta a las fuentes');
 
   const autor=el('g',{class:'fade'},svg);
-  txt(autor,'qbig',92,420,'Oscar Iván Vargas Pineda');
-  txt(autor,'tag',92,448,'Instructor');
+  txt(autor,'tag',92,408,'Elaborado por:');
+  txt(autor,'qbig',92,438,'Oscar Iván Vargas Pineda');
 
+  /* la columna derecha va de lo general a lo particular: el programa, luego el
+     módulo, y al pie la institución. La línea de acento hace de marco: el
+     recuadro punteado sobraba. */
   const ctx=el('g',{class:'fade'},svg);
   el('line',{x1:520,y1:178,x2:520,y2:436,stroke:t.ac,'stroke-width':1.4,opacity:.55},ctx);
-  el('rect',{class:'box',x:560,y:178,width:400,height:258,rx:3},ctx);
-  txt(ctx,'tag hot',580,206,'Módulo 1 · Formulación con IA');
-  txt(ctx,'line',580,242,'Del problema a las fuentes');
-  txt(ctx,'tag',580,282,'Programa de Formación en IA (PFIA)');
-  txt(ctx,'tag',580,302,'Perfil 03 · Proceso de investigación con IA');
-  txt(ctx,'tag hot',580,368,'Dirección Nacional de Innovación Académica');
-  txt(ctx,'tag hot',580,396,'Universidad Nacional de Colombia');
+  txt(ctx,'tag hot',560,206,'Programa de Formación en IA (PFIA)');
+  txt(ctx,'tag',560,230,'Perfil 03 · Proceso de investigación con IA');
+  txt(ctx,'tag hot',560,286,'Módulo 1 · Formulación con IA');
+  txt(ctx,'line',560,322,'Del problema a las fuentes');
+  txt(ctx,'tag hot',560,368,'Dirección Nacional de Innovación Académica');
+  txt(ctx,'tag hot',560,396,'Universidad Nacional de Colombia');
 
-  const setKw=chrome(svg,{sup:'Diseño de actividad de aprendizaje',term:'',kws:[]},idx,total);
+  const setKw=chrome(svg,{sup:'Actividad de aprendizaje',term:'',kws:[]},idx,total);
 
   const capas=[titulo,autor,ctx];
   stagger(capas,.55);
@@ -540,6 +654,15 @@ function slideRuta(svg,idx,total){
     return {g,r};
   });
 
+  /* la figura de cada momento, en la esquina libre de su tarjeta.
+     Va aparte del grupo de la tarjeta para no heredar ni el escalonado ni el
+     atenuado: aparece solo mientras esa tarjeta es la que está encendida. */
+  const FIG=['ecuacion','metadatos','algoritmo','arbol','mapa'];
+  const figs=FIG.map(function(id,k){
+    const g=el('g',{style:'--accent:'+HUE[ETAPAS[k]]+';--a2:'+TEMAS[ETAPAS[k]].a2},svg);
+    return mini(g,id,POS[k][0]+156,POS[k][1]+6);
+  });
+
   const links=[flechaFade(svg,330,250,344,250),flechaFade(svg,566,250,580,250)];
   /* la Y: del consolidado salen los dos análisis a la vez */
   const fork=el('g',{class:'fade'},svg);
@@ -571,6 +694,7 @@ function slideRuta(svg,idx,total){
       t2.g.classList.toggle('dim',k>beat);
       t2.r.classList.toggle('tileHot',k===beat);
     });
+    figs.forEach((g,k)=>on(g,k===beat));
     links.forEach((g,k)=>on(g,beat>=k+1));
     on(fork,beat>=3);
     pies.forEach((g,k)=>on(g,beat===k));
@@ -602,12 +726,20 @@ function slideEcuacion(svg,idx,total){
   txt(prom,'tag',368,348,'Sirve en cualquier tema');
   const fa1=flechaFade(svg,316,276,348,276);
 
+  /* la ecuación no se describe: se muestra. Los operadores en color son la
+     lección —campos, comillas, OR entre sinónimos, AND entre conceptos— y el
+     tema de ejemplo es intercambiable: lo que se copia es la estructura. */
   const cand=el('g',{class:'fade'},svg);
-  el('rect',{class:'panel',x:620,y:196,width:340,height:160,rx:3},cand);
-  txt(cand,'tag hot',636,224,'Candidatos de ecuación');
-  ['A · Términos amplios','B · Con descriptores','C · Variantes en inglés']
-    .forEach((s,i)=>txt(cand,'line',636,264+i*28,s));
-  txt(cand,'tag',636,344,'Los propone la IA, no los firma');
+  el('rect',{class:'panel',x:620,y:196,width:340,height:178,rx:3},cand);
+  txt(cand,'tag hot',636,224,'Ejemplo de ecuación · WoS');
+  /* la sangría va en la x, no en espacios: el SVG los colapsaría */
+  [[0,[['TS=',1],'("inteligencia artificial" ',['OR',1]]],
+   [30,['"artificial intelligence")']],
+   [0,[['AND ',1],['TS=',1],'("educación superior" ',['OR',1]]],
+   [30,['"higher education")']],
+   [0,[['AND ',1],['PY=',1],'(2015-2025)']]]
+    .forEach((d,i)=>codeLine(cand,636+d[0],252+i*20,d[1]));
+  txt(cand,'val',636,360,'Refinado: Article · Español, Inglés');
   const fa2=flechaFade(svg,584,276,616,276);
 
   const dec=el('g',{class:'fade'},svg);
@@ -617,7 +749,7 @@ function slideEcuacion(svg,idx,total){
   txt(dec,'tag',132,478,'La ecuación final queda escrita con sus bases, filtros y fecha');
 
   const setKw=chrome(svg,{sup:'Momento 01 · 25 minutos',term:'La ecuación',momento:1,
-    kws:['Su pregunta','El prompt reusable','Tres candidatos','La decisión es suya']},idx,total);
+    kws:['Su pregunta','El prompt reusable','Un ejemplo de ecuación','La decisión es suya']},idx,total);
 
   return function(beat){
     on(preg,true);
@@ -669,21 +801,49 @@ function slideMetadatos(svg,idx,total){
   txt(exp,'tag',798,368,'Formato exportable');
   const fa3=flechaFade(svg,746,296,778,296);
 
-  const eq=el('g',{class:'fade'},svg);
-  el('rect',{class:'panel',x:112,y:424,width:848,height:72,rx:3},eq);
-  const hAb=herramienta(eq,132,452,'abierto','Si su campo no está bien cubierto');
-  txt(eq,'line',132,484,'SciELO, OpenAlex o Dimensions: el flujo es indiferente a la fuente');
+  /* la franja de abajo cuenta el mismo momento sin palabras: la pregunta, los
+     dos archivos iguales de las dos bases, todo lo recuperado en un solo montón
+     y lo que sobrevive a los filtros. El tamaño del papel es el dato. */
+  const BASE=462;
+  const PASOS=[
+    {cx:200,lab:'Pregunta documentada',sub:'Con sus bases y su fecha',
+     dib(g,cx){
+       [[-27,453,20,.75],[0,460,34,1],[27,453,20,.75]].forEach(function(q){
+         txt(g,'',cx+q[0],q[1],'?',{style:'font-size:'+q[2]+'px;font-weight:600',
+           fill:'var(--cream)','text-anchor':'middle',opacity:q[3]});
+       });
+     }},
+    {cx:432,lab:'Las dos bases',sub:'WoS · Scopus',
+     dib(g,cx){ hoja(g,cx-38,BASE-40,30,40,{n:3}); hoja(g,cx+8,BASE-40,30,40,{n:3}); }},
+    {cx:664,lab:'Filtros',sub:'Todo lo recuperado',
+     dib(g,cx){ hoja(g,cx-23,BASE-56,46,56,{n:5}); }},
+    {cx:896,lab:'Metadatos',sub:'Ya filtrado',
+     dib(g,cx){ hoja(g,cx-13,BASE-34,26,34,{n:2,hot:true}); }}
+  ];
+  const pasos=PASOS.map(function(d){
+    const g=el('g',{class:'paso'},svg);
+    d.dib(g,d.cx);
+    txt(g,'tag',d.cx,484,d.lab,{'text-anchor':'middle'});
+    txt(g,'val',d.cx,504,d.sub,{'text-anchor':'middle'});
+    return g;
+  });
+  const pasoFa=[[252,378],[486,629],[703,871]]
+    .map(p=>flechaFade(svg,p[0],438,p[1],438));
 
   const setKw=chrome(svg,{sup:'Momento 02 · 25 minutos',term:'Los metadatos',momento:2,
-    kws:['La ecuación entra','Las dos bases','Filtros declarados','La alternativa abierta']},idx,total);
+    kws:['La ecuación documentada','Las dos bases','Los filtros','Los metadatos']},idx,total);
 
   return function(beat){
     on(ecu,true);
     on(bases,beat>=1); on(fa1,beat>=1);
     hW.foco(beat===1); hS.foco(beat===1);
     on(filt,beat>=2); on(fa2,beat>=2);
-    on(exp,beat>=2);  on(fa3,beat>=2);
-    on(eq,beat>=3);   hAb.foco(beat>=3);
+    on(exp,beat>=3);  on(fa3,beat>=3);
+    pasos.forEach(function(g,k){
+      g.classList.toggle('on',beat>=k);
+      g.classList.toggle('hot',beat===k);
+    });
+    pasoFa.forEach((g,k)=>on(g,beat>=k+1));
     setKw(beat);
   };
 }
@@ -807,18 +967,10 @@ function slideArbol(svg,idx,total){
   const fa2=flechaFade(svg,576,296,680,296,null,'Clasifica');
 
   const lect=el('g',{class:'fade'},svg);
-  txt(lect,'tag hot',112,412,'Y lo contrasta con lo que ya conoce de su campo');
-  [['Qué clásico','reconoce'],['Qué aparece que','no esperaba'],['Qué falta que','sabe que existe']]
-    .forEach(function(d,k){
-      const x=112+k*190;
-      el('rect',{class:'tile tileHot',x:x,y:428,width:178,height:52,rx:3},lect);
-      txt(lect,'tag ink',x+14,450,d[0]);
-      txt(lect,'tag ink',x+14,468,d[1]);
-    });
   txt(lect,'tag ok',112,504,'Tree of Science nació en la Universidad Nacional');
 
   const setKw=chrome(svg,{sup:'Momento 04 · 25 minutos',term:'El árbol',momento:4,
-    kws:['Un grafo de citas','El algoritmo mide','Raíz, tronco y hojas','La lectura crítica']},idx,total);
+    kws:['Un grafo de citas','El algoritmo mide','Raíz, tronco y hojas','Hecho en la Nacional']},idx,total);
 
   return function(beat){
     on(red,true);
@@ -954,36 +1106,44 @@ function slideValidacion(svg,idx,total){
   fondo(svg,idx,t,{bg:NEUTRO,franjas:ETAPAS.map(k=>HUE[k])});
   txt(svg,'qbig',120,164,'Métodos ya validados por la literatura, no herramientas de moda');
 
-  const POS=[[110,192],[516,192],[110,344],[516,344]];
+  const POS=[[112,190],[508,190],[112,352],[508,352]];
+  /* el color no sigue el orden de las tarjetas sino el momento que respalda:
+     violeta el consolidado, verde las dos citas de Tree of Science, coral el mapa.
+     `aut` va en cuerpo menor porque son listas largas; `src` en cuerpo de cita. */
   const CIT=[
-    ['El origen','Nació en la Universidad Nacional',
-     'Robledo, Osorio & López (2014)','Revista Vínculos, 11(2), 6–16'],
-    ['La consolidación','Grafos para analizar referencias',
-     'Zuluaga, Robledo, Osorio-Zuluaga et al. (2016)','Nova, 13(25), 121–138'],
-    ['La mejora','SAP afina la clasificación',
-     'Valencia-Hernández et al. (2020)','Ingeniería e Investigación, 40(1), 45–49'],
-    ['El mapa','La ciencia cartografiada en R',
-     'Aria & Cuccurullo (2017)','Journal of Informetrics, 11(4), 959–975']
+    {c:'violet',t:'El consolidado · la integración',d:'KKU-BiblioMerge: multi-base',
+     aut:['Chansanam, W. & Lai, C. (2025)'],
+     src:['Iberoamerican J. of Science Measurement','and Communication, 5(1), 4']},
+    {c:'leaf',t:'El árbol · el paquete',d:'tosr: el árbol desde WoS y Scopus',
+     aut:['Robledo, S.; Valencia, L.; Zuluaga, M.;',
+          'Arbelaez-Echeverri, O. & Arboleda Valencia, J. W. (2024)'],
+     src:['J. of Scientometric Research, 13(2)','10.5530/jscires.13.2.36']},
+    {c:'leaf',t:'El árbol · la herramienta',d:'Recomendación de literatura',
+     aut:['Zuluaga, M.; Robledo, S.; Arbelaez-Echeverri, O.;',
+          'Osorio-Zuluaga, G. A. & Duque-Méndez, N. (2022)'],
+     src:['Issues in Sci. and Tech. Librarianship, 100','10.29173/istl2696']},
+    {c:'coral',t:'El mapa · bibliometrix',d:'Science mapping en R',
+     aut:['Aria, M. & Cuccurullo, C. (2017)'],
+     src:['Journal of Informetrics, 11(4), 959–975']}
   ];
   const cards=CIT.map(function(d,k){
     const g=el('g',{class:'fade'},svg);
-    g.setAttribute('style','--accent:'+HUE[ETAPAS[k]]+';--wash:'+TEMAS[ETAPAS[k]].wash);
+    const col=HUE[d.c];
+    g.setAttribute('style','--accent:'+col+';--wash:'+TEMAS[d.c].wash);
     const x=POS[k][0], y=POS[k][1];
-    el('rect',{x:x,y:y,width:4,height:132,rx:1,fill:HUE[ETAPAS[k]]},g);
-    const r=el('rect',{class:'panel',x:x+10,y:y,width:374,height:132,rx:3},g);
-    marca(g,'paper',x+340,y+16,.78);
-    txt(g,'tag hot',x+28,y+28,d[0]);
-    txt(g,'line',x+28,y+62,d[1]);
-    txt(g,'cita',x+28,y+94,d[2]);
-    txt(g,'cita',x+28,y+114,d[3]);
+    el('rect',{x:x,y:y,width:4,height:148,rx:1,fill:col},g);
+    const r=el('rect',{class:'panel',x:x+10,y:y,width:376,height:148,rx:3},g);
+    marca(g,'paper',x+344,y+16,.78);
+    txt(g,'tag hot',x+28,y+26,d.t);
+    txt(g,'line',x+28,y+56,d.d);
+    d.aut.concat(d.src).forEach(function(s,i){
+      txt(g,i<d.aut.length?'citaSm':'cita',x+28,y+80+i*18,s);
+    });
     return {g,r};
   });
 
-  const cierre=el('g',{class:'fade'},svg);
-  txt(cierre,'tag ok',112,504,'Y el reporte del proceso sigue PRISMA 2020 · Page et al. (2021), BMJ 372, n71');
-
   const setKw=chrome(svg,{sup:'El respaldo · literatura indexada',term:'Validación',
-    kws:['El origen','La consolidación','La mejora','El mapa']},idx,total);
+    kws:['El consolidado','El árbol · el paquete','El árbol · la herramienta','El mapa']},idx,total);
 
   return function(beat){
     cards.forEach(function(c,k){
@@ -992,7 +1152,6 @@ function slideValidacion(svg,idx,total){
       c.g.style.transitionDelay=(k===beat?0:.1).toFixed(2)+'s';
       c.r.classList.toggle('panelHot',k===beat);
     });
-    on(cierre,beat>=3);
     setKw(beat);
   };
 }
